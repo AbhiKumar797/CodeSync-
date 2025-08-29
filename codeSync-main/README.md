@@ -217,3 +217,13 @@ Also, huge gratitude to Tldraw contributors for their amazing library. For more 
 -   [Tldraw Repository](https://github.com/tldraw/tldraw)
 -   [Tldraw Documentation](https://tldraw.dev/)
 # code-and-share
+
+📌 Roadmap (Next Release)
+
+🔐 Admin Permissions (role-based access)
+
+🔎 Search & Replace functionality
+
+📹 Video/Voice chat integration
+
+🌐 Multi-language code execution
