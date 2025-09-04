@@ -37,7 +37,7 @@ function ChatInput() {
             <input
                 type="text"
                 className="w-full flex-grow rounded-md border-none bg-dark p-2 outline-none"
-                placeholder="Enter a message..."
+                placeholder="Type your message here..."
                 ref={inputRef}
             />
             <button
