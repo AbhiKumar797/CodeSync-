@@ -21,7 +21,7 @@ function UsersTab() {
             await navigator.clipboard.writeText(url)
             toast.success("URL copied to clipboard")
         } catch (error) {
-            toast.error("Unable to copy URL to clipboard")
+            toast.error("Unable to copy URL to clipboard!!")
             console.log(error)
         }
     }
