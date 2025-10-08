@@ -10,6 +10,7 @@ const defaultSettings = {
     fontSize: "16",
     fontFamily: "Space Mono",
     showGitHubCorner: true,
+    showLineNumbers: true,
 }
 
 function SettingContextProvider({ children }) {
@@ -31,12 +32,17 @@ function SettingContextProvider({ children }) {
         storedSettings.fontFamily !== undefined
             ? storedSettings.fontFamily
             : defaultSettings.fontFamily
+    const storedShowLineNumbers =
+        storedSettings.showLineNumbers !== undefined
+            ? storedSettings.showLineNumbers
+            : defaultSettings.showLineNumbers
 
     // Separate state variables for each setting
     const [theme, setTheme] = useState(storedTheme)
     const [language, setLanguage] = useState(storedLanguage)
     const [fontSize, setFontSize] = useState(storedFontSize)
     const [fontFamily, setFontFamily] = useState(storedFontFamily)
+    const [showLineNumbers, setShowLineNumbers] = useState(storedShowLineNumbers)
 
 
     const resetSettings = () => {
@@ -44,6 +50,7 @@ function SettingContextProvider({ children }) {
         setLanguage(defaultSettings.language)
         setFontSize(defaultSettings.fontSize)
         setFontFamily(defaultSettings.fontFamily)
+        setShowLineNumbers(defaultSettings.showLineNumbers)
     }
 
     useEffect(() => {
@@ -53,9 +60,10 @@ function SettingContextProvider({ children }) {
             language,
             fontSize,
             fontFamily,
+            showLineNumbers,
         }
         localStorage.setItem("settings", JSON.stringify(updatedSettings))
-    }, [theme, language, fontSize, fontFamily])
+    }, [theme, language, fontSize, fontFamily, showLineNumbers])
 
     return (
         <SettingContext.Provider
@@ -68,6 +76,8 @@ function SettingContextProvider({ children }) {
                 setFontSize,
                 fontFamily,
                 setFontFamily,
+                showLineNumbers,
+                setShowLineNumbers,
                 resetSettings,
             }}
         >
