@@ -1,17 +1,20 @@
 function Footer() {
+    const currentYear = new Date().getFullYear();
     return (
-        <footer className="static bottom-1 left-0 flex w-full justify-center sm:fixed">
+        <footer className="static bottom-2 left-0 flex w-full justify-center text-sm text-gray-400 sm:fixed">
             <span>
-                Build with ❤️ by{" "}
+                © {currentYear} CodeSync | Developed by{" "}
                 <a
                     href=""
-                    className="text-primary underline underline-offset-1"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
                 >
-                    Abhishek Kumar, Avadhbihari, Charu Siddharth
+                    CodeSync
                 </a>
             </span>
         </footer>
-    )
+    );
 }
 
-export default Footer
+export default Footer;
