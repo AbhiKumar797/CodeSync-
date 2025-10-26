@@ -1,180 +1,250 @@
-const express = require("express")
-const app = express()
-require("dotenv").config()
-const http = require("http")
-const cors = require("cors")
-const ACTIONS = require("./utils/actions")
+const express = require("express");
+const app = express();
+require("dotenv").config(); // Make sure dotenv is configured
+const http = require("http");
+const cors = require("cors");
+const ACTIONS = require("./utils/actions");
+const { Server } = require("socket.io"); // Import Server from socket.io
 
-app.use(express.json())
+// --- CORS Configuration ---
+const allowedOrigins = [process.env.CORS_ORIGIN].filter(Boolean); // Get URL from env var
 
-app.use(cors())
+// Optional: Add localhost for development
+if (process.env.NODE_ENV !== 'production') {
+    allowedOrigins.push('http://localhost:5173'); // Your Vite dev port
+    // You might add others like http://127.0.0.1:5173 if needed
+}
 
-const { Server } = require("socket.io")
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl) or from allowed list
+        // Allow no origin only in non-production environments for safety
+        if ((!origin && process.env.NODE_ENV !== 'production') || allowedOrigins.indexOf(origin) !== -1) {
+             callback(null, true);
+        } else {
+             callback(new Error('Not allowed by CORS'));
+        }
+     },
+     credentials: true // Set this if you need cookies/sessions across origins
+ };
 
-const server = http.createServer(app)
+app.use(express.json());
+
+// --- Apply CORS Middleware to Express ---
+app.use(cors(corsOptions)); // Use the configured CORS options
+
+// --- Socket.IO Server Setup ---
+const server = http.createServer(app);
 const io = new Server(server, {
-	cors: {
-		origin: "*",
-	},
-})
+    cors: { // Configure CORS for Socket.IO
+       origin: allowedOrigins, // Use the same origins
+        methods: ["GET", "POST"],
+        credentials: true // Match Express CORS if needed
+    },
+});
 
-let userSocketMap = []
+// --- In-memory User Storage ---
+let userSocketMap = [];
 
 function getUsersInRoom(roomId) {
-	return userSocketMap.filter((user) => user.roomId == roomId)
+    return userSocketMap.filter((user) => user.roomId == roomId);
 }
 
 function getRoomId(socketId) {
-	const user = userSocketMap.find((user) => user.socketId === socketId)
-	return user?.roomId
+    const user = userSocketMap.find((user) => user.socketId === socketId);
+    return user?.roomId;
 }
 
+// --- Socket.IO Connection Logic ---
 io.on("connection", (socket) => {
-	// Handle user actions
-	socket.on(ACTIONS.JOIN_REQUEST, ({ roomId, username }) => {
-		// Check is username exist in the room
-		const isUsernameExist = getUsersInRoom(roomId).filter(
-			(u) => u.username === username
-		)
-		if (isUsernameExist.length > 0) {
-			io.to(socket.id).emit(ACTIONS.USERNAME_EXISTS)
-			return
-		}
+    console.log(`Socket connected: ${socket.id}`); // Log connections
 
-		const user = {
-			username,
-			roomId,
-			status: ACTIONS.USER_ONLINE,
-			cursorPosition: 0,
-			typing: false,
-			socketId: socket.id,
-			currentFile: null,
-		}
-		userSocketMap.push(user)
-		socket.join(roomId)
-		socket.broadcast.to(roomId).emit(ACTIONS.USER_JOINED, { user })
-		const users = getUsersInRoom(roomId)
-		io.to(socket.id).emit(ACTIONS.JOIN_ACCEPTED, { user, users })
-	})
+    // Handle user actions
+    socket.on(ACTIONS.JOIN_REQUEST, ({ roomId, username }) => {
+        // Check if username exists in the room
+        const isUsernameExist = getUsersInRoom(roomId).some( // Use .some for efficiency
+            (u) => u.username === username
+        );
+        if (isUsernameExist) {
+            io.to(socket.id).emit(ACTIONS.USERNAME_EXISTS);
+            return;
+        }
 
-	socket.on("disconnecting", () => {
-		const user = userSocketMap.find((user) => user.socketId === socket.id)
-		const roomId = user?.roomId
-		if (roomId === undefined || user === undefined) return
-		socket.broadcast.to(roomId).emit(ACTIONS.USER_DISCONNECTED, { user })
-		userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id)
-		socket.leave()
-	})
+        const user = {
+            username,
+            roomId,
+            status: ACTIONS.USER_ONLINE,
+            cursorPosition: 0,
+            typing: false,
+            socketId: socket.id,
+            currentFile: null, // Consider initializing this based on existing users if needed
+        };
+        userSocketMap.push(user);
+        socket.join(roomId);
+        // Broadcast to others in the room
+        socket.broadcast.to(roomId).emit(ACTIONS.USER_JOINED, { user });
+        const users = getUsersInRoom(roomId);
+        // Send confirmation and user list back to the joining user
+        io.to(socket.id).emit(ACTIONS.JOIN_ACCEPTED, { user, users });
+        console.log(`${username} joined room ${roomId}`);
+    });
 
-	// Handle file actions
-	socket.on(ACTIONS.SYNC_FILES, ({ files, currentFile, socketId }) => {
-		io.to(socketId).emit(ACTIONS.SYNC_FILES, {
-			files,
-			currentFile,
-		})
-	})
+    socket.on("disconnecting", () => {
+        const user = userSocketMap.find((user) => user.socketId === socket.id);
+        const roomId = user?.roomId;
+        if (roomId === undefined || user === undefined) return;
 
-	socket.on(ACTIONS.FILE_CREATED, ({ file }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.FILE_CREATED, { file })
-	})
+        console.log(`${user.username} disconnecting from room ${roomId}`);
+        socket.broadcast.to(roomId).emit(ACTIONS.USER_DISCONNECTED, { user });
+        userSocketMap = userSocketMap.filter((u) => u.socketId !== socket.id);
+        // socket.leave() happens automatically on disconnect
+    });
 
-	socket.on(ACTIONS.FILE_UPDATED, ({ file }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.FILE_UPDATED, { file })
-	})
+    // Handle file actions
+    socket.on(ACTIONS.SYNC_FILES, ({ files, currentFile, socketId }) => {
+        io.to(socketId).emit(ACTIONS.SYNC_FILES, {
+            files,
+            currentFile,
+        });
+    });
 
-	socket.on(ACTIONS.FILE_RENAMED, ({ file }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.FILE_RENAMED, { file })
-	})
+    socket.on(ACTIONS.FILE_CREATED, ({ file }) => {
+        const roomId = getRoomId(socket.id);
+        if (roomId) { // Ensure roomId is valid before broadcasting
+            socket.broadcast.to(roomId).emit(ACTIONS.FILE_CREATED, { file });
+        }
+    });
 
-	socket.on(ACTIONS.FILE_DELETED, ({ id }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.FILE_DELETED, { id })
-	})
+    socket.on(ACTIONS.FILE_UPDATED, ({ file }) => {
+        const roomId = getRoomId(socket.id);
+         if (roomId) {
+            socket.broadcast.to(roomId).emit(ACTIONS.FILE_UPDATED, { file });
+         }
+    });
 
-	// Handle user status
-	socket.on(ACTIONS.USER_OFFLINE, ({ socketId }) => {
-		userSocketMap = userSocketMap.map((user) => {
-			if (user.socketId === socketId) {
-				return { ...user, status: ACTIONS.USER_OFFLINE }
-			}
-			return user
-		})
-		const roomId = getRoomId(socketId)
-		socket.broadcast.to(roomId).emit(ACTIONS.USER_OFFLINE, { socketId })
-	})
+    socket.on(ACTIONS.FILE_RENAMED, ({ file }) => {
+        const roomId = getRoomId(socket.id);
+         if (roomId) {
+            socket.broadcast.to(roomId).emit(ACTIONS.FILE_RENAMED, { file });
+         }
+    });
 
-	socket.on(ACTIONS.USER_ONLINE, ({ socketId }) => {
-		userSocketMap = userSocketMap.map((user) => {
-			if (user.socketId === socketId) {
-				return { ...user, status: ACTIONS.USER_ONLINE }
-			}
-			return user
-		})
-		const roomId = getRoomId(socketId)
-		socket.broadcast.to(roomId).emit(ACTIONS.USER_ONLINE, { socketId })
-	})
+    socket.on(ACTIONS.FILE_DELETED, ({ id }) => {
+        const roomId = getRoomId(socket.id);
+         if (roomId) {
+            socket.broadcast.to(roomId).emit(ACTIONS.FILE_DELETED, { id });
+         }
+    });
 
-	// Handle chat actions
-	socket.on(ACTIONS.SEND_MESSAGE, ({ message }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.RECEIVE_MESSAGE, { message })
-	})
+    // Handle user status
+    socket.on(ACTIONS.USER_OFFLINE, ({ socketId }) => {
+        const roomId = getRoomId(socketId);
+        if (!roomId) return; // Exit if user/room not found
 
-	// Handle cursor position
-	socket.on(ACTIONS.TYPING_START, ({ cursorPosition }) => {
-		userSocketMap = userSocketMap.map((user) => {
-			if (user.socketId === socket.id) {
-				return { ...user, typing: true, cursorPosition }
-			}
-			return user
-		})
-		const user = userSocketMap.find((user) => user.socketId === socket.id)
-		const roomId = user.roomId
-		socket.broadcast.to(roomId).emit(ACTIONS.TYPING_START, { user })
-	})
+        userSocketMap = userSocketMap.map((user) => {
+            if (user.socketId === socketId) {
+                return { ...user, status: ACTIONS.USER_OFFLINE };
+            }
+            return user;
+        });
+        socket.broadcast.to(roomId).emit(ACTIONS.USER_OFFLINE, { socketId });
+    });
 
-	socket.on(ACTIONS.TYPING_PAUSE, () => {
-		userSocketMap = userSocketMap.map((user) => {
-			if (user.socketId === socket.id) {
-				return { ...user, typing: false }
-			}
-			return user
-		})
-		const user = userSocketMap.find((user) => user.socketId === socket.id)
-		const roomId = user.roomId
-		socket.broadcast.to(roomId).emit(ACTIONS.TYPING_PAUSE, { user })
-	})
+    socket.on(ACTIONS.USER_ONLINE, ({ socketId }) => {
+         const roomId = getRoomId(socketId);
+         if (!roomId) return; // Exit if user/room not found
 
-	socket.on(ACTIONS.REQUEST_DRAWING, () => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast
-			.to(roomId)
-			.emit(ACTIONS.REQUEST_DRAWING, { socketId: socket.id })
-	})
+        userSocketMap = userSocketMap.map((user) => {
+            if (user.socketId === socketId) {
+                return { ...user, status: ACTIONS.USER_ONLINE };
+            }
+            return user;
+        });
+        socket.broadcast.to(roomId).emit(ACTIONS.USER_ONLINE, { socketId });
+    });
 
-	socket.on(ACTIONS.SYNC_DRAWING, ({ drawingData, socketId }) => {
-		socket.broadcast
-			.to(socketId)
-			.emit(ACTIONS.SYNC_DRAWING, { drawingData })
-	})
+    // Handle chat actions
+    socket.on(ACTIONS.SEND_MESSAGE, ({ message }) => {
+        const roomId = getRoomId(socket.id);
+        if (roomId) {
+           socket.broadcast.to(roomId).emit(ACTIONS.RECEIVE_MESSAGE, { message });
+        }
+    });
 
-	socket.on(ACTIONS.DRAWING_UPDATE, ({ snapshot }) => {
-		const roomId = getRoomId(socket.id)
-		socket.broadcast.to(roomId).emit(ACTIONS.DRAWING_UPDATE, {
-			snapshot,
-		})
-	})
-})
+    // Handle cursor position and typing status
+    socket.on(ACTIONS.TYPING_START, ({ cursorPosition }) => {
+        const user = userSocketMap.find((user) => user.socketId === socket.id);
+        if (!user || !user.roomId) return; // Ensure user and room exist
 
-const PORT = process.env.PORT || 3000
+        // Update the specific user's typing status and position
+        const updatedUser = { ...user, typing: true, cursorPosition };
+        userSocketMap = userSocketMap.map((u) => u.socketId === socket.id ? updatedUser : u);
+
+        socket.broadcast.to(user.roomId).emit(ACTIONS.TYPING_START, { user: updatedUser }); // Send updated user object
+    });
+
+    socket.on(ACTIONS.TYPING_PAUSE, () => {
+        const user = userSocketMap.find((user) => user.socketId === socket.id);
+        if (!user || !user.roomId) return;
+
+        // Update the specific user's typing status
+        const updatedUser = { ...user, typing: false };
+        userSocketMap = userSocketMap.map((u) => u.socketId === socket.id ? updatedUser : u);
+
+        socket.broadcast.to(user.roomId).emit(ACTIONS.TYPING_PAUSE, { user: updatedUser }); // Send updated user object
+    });
+
+    // Handle drawing actions
+    socket.on(ACTIONS.REQUEST_DRAWING, () => {
+        const roomId = getRoomId(socket.id);
+        if (roomId) {
+           // Find a user in the room to request the drawing from (e.g., the first one who isn't the requester)
+           const sourceUser = userSocketMap.find(u => u.roomId === roomId && u.socketId !== socket.id);
+           if (sourceUser) {
+              io.to(sourceUser.socketId).emit(ACTIONS.REQUEST_DRAWING, { socketId: socket.id });
+           }
+           // Consider what happens if no other user is present or has drawing data
+        }
+    });
+
+    socket.on(ACTIONS.SYNC_DRAWING, ({ drawingData, socketId }) => {
+        // Send the drawing data specifically to the requesting socket
+        io.to(socketId).emit(ACTIONS.SYNC_DRAWING, { drawingData });
+    });
+
+    socket.on(ACTIONS.DRAWING_UPDATE, ({ snapshot }) => {
+        const roomId = getRoomId(socket.id);
+        if (roomId) {
+            socket.broadcast.to(roomId).emit(ACTIONS.DRAWING_UPDATE, {
+                snapshot,
+            });
+        }
+    });
+
+     // Handle potential errors on the socket
+     socket.on("error", (err) => {
+        console.error(`Socket Error on ${socket.id}:`, err);
+    });
+
+});
+
+// --- Server Startup ---
+const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-	res.send("API is running successfully!!")
-})
+    res.send("API is running successfully!!");
+});
 
 server.listen(PORT, () => {
-	console.log(`Listening on port ${PORT}`)
-})
+    console.log(`Listening on port ${PORT}`);
+});
+
+// Optional: Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    // You might want to close DB connections here too
+    process.exit(0);
+  });
+});
