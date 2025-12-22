@@ -4,6 +4,8 @@
 
 Code Sync is a collaborative, real-time code editor where users can seamlessly code together. It provides a platform for multiple users to enter a room, share a unique room ID, and collaborate on code simultaneously.
 
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge)](https://code-sync-brown.vercel.app/)
+
 ## 🔮 Features
 
 -   💻 Real-time collaboration on code editing across multiple files
